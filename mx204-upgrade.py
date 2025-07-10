@@ -123,7 +123,7 @@ def check_image(m: manager) -> None:
 
 def main():
     with manager.connect(
-        username = "Username: ",
+        username = input("Username: "),
         password = getpass.getpass("Password: "),
         host = input("Host: "),
         port = input("Port (Leave blank for default 830): ") or 830,

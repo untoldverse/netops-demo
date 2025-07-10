@@ -4,4 +4,8 @@ version = "0.1.0"
 description = "Collection of standalone scripts using public libs"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "ncclient>=0.6.19",
+    "pandas>=2.3.1",
+    "xmltodict>=0.14.2",
+]
