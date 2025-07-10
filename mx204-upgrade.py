@@ -123,9 +123,10 @@ def check_image(m: manager) -> None:
 
 def main():
     with manager.connect(
-        username = "josh.mommers",
-        password = getpass.getpass("Enter password: "),
-        host = "nyc-eq9-ip-1",
+        username = "Username: ",
+        password = getpass.getpass("Password: "),
+        host = input("Host: "),
+        port = input("Port (Leave blank for default 830): ") or 830,
         device_params = {'name':'junos'},
         hostkey_verify=False,
         look_for_keys=False,
