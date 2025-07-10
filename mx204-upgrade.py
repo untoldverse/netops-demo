@@ -4,6 +4,7 @@ import json
 import getpass
 import pandas
 import sys
+import jinja2
 #<rpc-reply xmlns:junos="http://xml.juniper.net/junos/21.1R0/junos">
 VM_MD5_SUM = "924aa5c91e1fae2b2015519dfc9be633"
 OS_MD5_SUM = "30aba39958b2578751437027a1b800d4"
@@ -41,11 +42,34 @@ def update_bgp_neighbors(m: manager, state: str) -> None:
     """
 
     bgp_neighbors = get_bgp_neighbors(m)
-    for neighbor in bgp_neighbors:
-        #Junos will append the TCP Port in the address, so we split the address via + and take the first occurance
-        if "+" in neighbor['peer-address']:
-            neighbor['peer-address'] = neighbor['peer-address'].split("+")[0]
-        m.rpc("")
+    try:
+        for neighbor in bgp_neighbors:
+            #Junos will append the TCP Port in the address, so we split the address via + and take the first occurance
+            if neighbor['peer-address'].find('+') != -1:
+                neighbor['peer-address'] = neighbor['peer-address'].split("+")[0]
+                #debug
+                print(neighbor['peer-address'])
+                #set rpc config
+            bgp_config_template = """
+            <configuration>
+                <protocols>
+                    <bgp>
+                        <group>
+                            <name>{{ group }}</name>
+                            <shutdown>
+                            </shutdown>
+                        </group>
+                    </bgp>
+                </protocols>
+            </configuration>
+            """
+            
+            output = m.rpc(
+                jinja2.Template(bgp_config_template).render(group=neighbor['peer-group'])
+            )
+    except Exception as e:
+            print(e)
+        #m.rpc("")
     
     #Print the 
     print(pandas.DataFrame(get_bgp_neighbors(m)))
@@ -122,24 +146,31 @@ def check_image(m: manager) -> None:
         sys.exit()
 
 def main():
-    with manager.connect(
-        username = input("Username: "),
-        password = getpass.getpass("Password: "),
-        host = input("Host: "),
-        port = input("Port (Leave blank for default 830): ") or 830,
-        device_params = {'name':'junos'},
-        hostkey_verify=False,
-        look_for_keys=False,
-        allow_agent=False,
-    ) as m:
+    state = "enabled"
 
-        bgp_neighbors = get_bgp_neighbors(m)
-        print(pandas.DataFrame(bgp_neighbors))
-        get_storage(m)
-        get_dhcp_time(m)
-        #with open("mx204.json","w") as f:
-        #    f.write(json.dumps(bgp_neighbors,indent=2))
-    
 
+    try:
+        with manager.connect(
+            username = input("Username: "),
+            password = getpass.getpass("Password: "),
+            host = input("Host: "),
+            port = input("Port (Leave blank for default 830): ") or 830,
+            device_params = {'name':'junos'},
+            hostkey_verify=False,
+            look_for_keys=False,
+            allow_agent=False,
+            timeout=30
+        ) as m:
+
+            bgp_neighbors = get_bgp_neighbors(m)
+            print(pandas.DataFrame(bgp_neighbors))
+            get_storage(m)
+            update_bgp_neighbors(m, state)
+            #get_dhcp_time(m)
+            #with open("mx204.json","w") as f:
+            #    f.write(json.dumps(bgp_neighbors,indent=2))
+        
+    except Exception as e:
+        print("Failed to connect")
 if __name__ == "__main__":
     main()
