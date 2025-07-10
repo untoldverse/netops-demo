@@ -7,6 +7,7 @@ import sys
 import jinja2
 import logging
 import time
+import datetime
 #<rpc-reply xmlns:junos="http://xml.juniper.net/junos/21.1R0/junos">
 VM_MD5_SUM = "924aa5c91e1fae2b2015519dfc9be633"
 OS_MD5_SUM = "30aba39958b2578751437027a1b800d4"
@@ -64,7 +65,7 @@ def update_bgp_neighbors(m: manager, state: str, change_number: str) -> None:
     bgp_neighbors = get_bgp_neighbors(m)
     print("******************")
     print(pandas.DataFrame(bgp_neighbors))
-    if state.lower() == "disabled":
+    if state.lower() == "graceful":
         try: 
             commands = []
             print("Enabling Graceful-Shudown to all groups") 
@@ -82,8 +83,17 @@ def update_bgp_neighbors(m: manager, state: str, change_number: str) -> None:
             )
             print("Commiting changes: ",commit_config(m))
             ##
-
-
+            print(
+                """
+                PLEASE ALLOW 15 MINUTES FOR TRAFFIC TO DRAIN BEFORE SHUTTING DOWN THE BGP NEIGHBORS
+                """
+            ,
+            )
+        except Exception as e:
+            print(e)
+            rollback_config
+    elif state.lower() == "disabled":
+        try:
             commands = []
             for neighbor in bgp_neighbors:
                 #Junos will append the TCP Port in the address, so we split the address via + and take the first occurance
@@ -171,6 +181,7 @@ def set_chassis_interface(m: manager) -> None:
         "delete chassis fpc 0 pic 1 port 7",
         "set chassis fpc 0 pic 1 number-of-ports 0"
     ]
+    print("Pre Chassis Interface Status: ", get_interface_status(m))
     try:
         logging.info(
             m.load_configuration(
@@ -253,7 +264,11 @@ def check_image(m: manager) -> None:
         sys.exit()
 
 def main():
-    state = input("BGP State enabled/disabled: ")
+    """
+    MX204 script
+    """
+    #Decide wither to set BGP graceful-shutdown, shutdown, or enable - Seperate as 3 choices as graceful-shutdown should be seperate to allow traffic to drain
+    state = input("BGP State graceful/enabled/disabled: ")
     if state == "disabled":
         change_number = input("Enter CC number for shutdown notification: ") or "CC2-Testing"
     else:
@@ -273,15 +288,22 @@ def main():
         ) as m:
 
            
-            
+            print("Checks")
             get_storage(m)
-            update_bgp_neighbors(m, state,change_number)
-            #Below is PoC for Demo as need to incorporate Pre/Post Changes
-            if state == "disabed":
+
+            #Set DHCP Lease time to 3600 work is being done; else reset the timer back to 2 mins
+            if state.lower() == "disabed" or state.lower() == "graceful":
                 update_dhcp_timers(m, 3600)
             else:
                 update_dhcp_timers(m, 120)
-            #get_interface_status(m) #For Chassis Interface Debug
+            
+            update_bgp_neighbors(m, state,change_number)
+
+            """
+            TODO 
+            Call Chassis Interface config if BGP Neighbors are shut and the 4 port 100g are not configured
+            Call Software Add - Reboot Done Manually
+            """
             print("Please reboot manually")
         
     except Exception as e:
