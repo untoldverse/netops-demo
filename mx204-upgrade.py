@@ -5,6 +5,8 @@ import getpass
 import pandas
 import sys
 import jinja2
+import logging
+import time
 #<rpc-reply xmlns:junos="http://xml.juniper.net/junos/21.1R0/junos">
 VM_MD5_SUM = "924aa5c91e1fae2b2015519dfc9be633"
 OS_MD5_SUM = "30aba39958b2578751437027a1b800d4"
@@ -12,12 +14,28 @@ OS_MD5_SUM = "30aba39958b2578751437027a1b800d4"
 VM_PACKAGE = "junos-vmhost-install-mx-x86-64-23.4R2-S4.11.tgz"
 OS_PACKAGE = "os-package.tgz"
 
+
+def rollback_config(m: manager)-> None:
+    """
+    Rollback changes incase of a failure
+    """
+    print("Rolling Back changes")
+    m.rollback()
+
 def commit_config(m:manager)-> str:
     """
     Commit the config
     Return pass or error
     """
+    print("Validating results")
+    validate_results = m.validate()
+    logging.info(validate_results)
+    print("""
+    Configuration Changes: 
 
+    """,xmltodict.parse(m.compare_configuration().data_xml)['rpc-reply']['configuration-information']['configuration-output']
+    )
+    return list(xmltodict.parse(m.commit().data_xml)['rpc-reply'].keys())[1]
 
 def get_bgp_neighbors(m: manager) -> list:
     """
@@ -36,79 +54,163 @@ def get_bgp_neighbors(m: manager) -> list:
             }
         )
     return bgp_neighbors
-def update_bgp_neighbors(m: manager, state: str) -> None:
+def update_bgp_neighbors(m: manager, state: str, change_number: str) -> None:
     """
     Takes in the netconf session and desired state and updates BGP neighbors
+
+    Shutdown will update the groups with Graceful-Shutdown then wait 5 minutes before shutting the connection 
     """
-
+    print("BGP Neighbor States before changes")
     bgp_neighbors = get_bgp_neighbors(m)
-    try:
-        for neighbor in bgp_neighbors:
-            #Junos will append the TCP Port in the address, so we split the address via + and take the first occurance
-            if neighbor['peer-address'].find('+') != -1:
-                neighbor['peer-address'] = neighbor['peer-address'].split("+")[0]
-                #debug
-                print(neighbor['peer-address'])
-                #set rpc config
-            bgp_config_template = """
-            <configuration>
-                <protocols>
-                    <bgp>
-                        <group>
-                            <name>{{ group }}</name>
-                            <shutdown>
-                            </shutdown>
-                        </group>
-                    </bgp>
-                </protocols>
-            </configuration>
-            """
-            
-            output = m.rpc(
-                jinja2.Template(bgp_config_template).render(group=neighbor['peer-group'])
+    print("******************")
+    print(pandas.DataFrame(bgp_neighbors))
+    if state.lower() == "disabled":
+        try: 
+            commands = []
+            print("Enabling Graceful-Shudown to all groups") 
+            for neighbor in bgp_neighbors:
+                #Junos will append the TCP Port in the address, so we split the address via + and take the first occurance
+                if neighbor['peer-address'].find('+') != -1:
+                    neighbor['peer-address'] = neighbor['peer-address'].split("+")[0]
+                    #set rpc config
+                bgp_config_template = "set protocols bgp group {{ group }} graceful-shutdown sender local-preference 0"
+                commands.append(jinja2.Template(bgp_config_template).render(group=neighbor['peer-group']))
+
+            m.load_configuration(
+                action="set",
+                config=commands
             )
-    except Exception as e:
+            print("Commiting changes: ",commit_config(m))
+            ##
+
+
+            commands = []
+            for neighbor in bgp_neighbors:
+                #Junos will append the TCP Port in the address, so we split the address via + and take the first occurance
+                if neighbor['peer-address'].find('+') != -1:
+                    neighbor['peer-address'] = neighbor['peer-address'].split("+")[0]
+                #Notification Message has a character limit
+                bgp_config_template = "set protocols bgp group {{ group }} shutdown notify-message {{ change }}"
+                commands.append(jinja2.Template(bgp_config_template).render(group=neighbor['peer-group'],change=change_number))
+            m.load_configuration(
+                action="set",
+                config=commands
+            )
+            print("Commiting changes: ",commit_config(m))
+        except Exception as e:
+                print(e)
+    elif state.lower() == "enabled":
+        try:
+            print("Removing Graceful shutdown")
+            for neighbor in bgp_neighbors:
+                #Junos will append the TCP Port in the address, so we split the address via + and take the first occurance
+                if neighbor['peer-address'].find('+') != -1:
+                    neighbor['peer-address'] = neighbor['peer-address'].split("+")[0]
+                    #set rpc config
+                bgp_config_template = "delete protocols bgp group {{ group }} graceful-shutdown"
+                        
+                try:
+                    m.load_configuration(
+                        action="set",
+                        config=jinja2.Template(bgp_config_template).render(group=neighbor['peer-group']), 
+                        format="text"
+                    )
+                finally:
+                    continue
+        except Exception as e:
             print(e)
-        #m.rpc("")
-    
-    #Print the 
+            rollback_config(m)    
+        
+        try:
+            print("Removing BGP shutdown")    
+            for neighbor in bgp_neighbors:
+                #Junos will append the TCP Port in the address, so we split the address via + and take the first occurance
+                if neighbor['peer-address'].find('+') != -1:
+                    neighbor['peer-address'] = neighbor['peer-address'].split("+")[0]
+                    #set rpc config
+                bgp_config_template = "delete protocols bgp group {{ group }} shutdown"
+                try:
+                    m.load_configuration(
+                        action="set",
+                        config=jinja2.Template(bgp_config_template).render(group=neighbor['peer-group']),
+                        format="text"
+                    )
+                finally:
+                    continue
+            print("Commiting changes: ",commit_config(m))
+
+        except Exception as e:
+                print(e)
+                rollback_config(m)
+    #Sleep for BGP changes (Especially after removing shutdown)
+    print("Waiting for BGP Changes: ")
+    time.sleep(10)
+    print("Post Change BGP Neighor Status:")
     print(pandas.DataFrame(get_bgp_neighbors(m)))
-    
 
-def get_interface_stats(m: manager):
-    pass
+def get_interface_status(m: manager):
+    print(
+        xmltodict.parse(m.command("show interface terse",format="text").data_xml)['rpc-reply']['output']
+    )
 
-def set_chassis_interface(m: manager) -> str:
+def set_chassis_interface(m: manager) -> None:
     """
     Set the interface config to have all 4 100gs and disable the 10g ports
-
     Returns and ok or error 
     """
+    interface_commands = [
+        "set chassis fpc 0 pic 0 port 2 speed 100g",
+        "set chassis fpc 0 pic 0 port 3 speed 100g",
+        "delete chassis fpc 0 pic 1 port 0",
+        "delete chassis fpc 0 pic 1 port 1",
+        "delete chassis fpc 0 pic 1 port 2",
+        "delete chassis fpc 0 pic 1 port 3",
+        "delete chassis fpc 0 pic 1 port 4",
+        "delete chassis fpc 0 pic 1 port 5",
+        "delete chassis fpc 0 pic 1 port 6",
+        "delete chassis fpc 0 pic 1 port 7",
+        "set chassis fpc 0 pic 1 number-of-ports 0"
+    ]
+    try:
+        logging.info(
+            m.load_configuration(
+                action="set",
+                config = interface_commands,
+                format="text"
+            )
+        )
+        print("Commiting Chassis Interface changes: ",commit_changes(m))
+
+        get_interface_status(m)
+
+    except Exception as e:
+        print(e)
+        rollback_config(m)
+
 
 def get_dhcp_time(m: manager) -> None:
     current_dhcp_bindings = "<get-dhcp-server-binding-information></get-dhcp-server-binding-information>"
-    current_dhcp_time = """
-    <get-config>
-        <source>
-            <running/>
-        </source>
-        <filter>
-            <configuration>
-                <access>
-                    <protocol-attributes>
-                        <name>default-dhcp</name>
-                    </protocol-attributes>
-                </access>
-            </configuration>
-        </filter>
 
-    </get-config>
-    """
-    #print(pandas.DataFrame(xmltodict.parse(m.rpc(current_dhcp_time).data_xml)['rpc-reply']['data']['configuration']['access']['protocol']))
     print(pandas.DataFrame(xmltodict.parse(m.rpc(current_dhcp_bindings).data_xml)['rpc-reply']['dhcp-server-binding-information']['dhcp-binding']))
-def update_dhcp_timers(m: manager, time: int) -> str:
-    pass
 
+def update_dhcp_timers(m: manager, time: int) -> None:
+    """
+    Set DHCP lease time 
+    """
+    print("Current DHCP lease time configuration: ")
+    print(xmltodict.parse(m.command("show access protocol-attributes default-dhcp dhcp maximum-lease-time").data_xml))['rpc-reply']['output']
+    dhcp_config_template = "set access protocol-attributes default-dhcp dhcp maximum-lease-time {{ time }}"
+    try:
+        m.load_configuration(
+            action="set",
+            config=jinja2.Template(dhcp_config_template).render(time=time),
+            format="text"
+        )
+        print("Commiting DHCP maximum lease time change: ", commit_config(m))
+    except Exception as e:
+        print(e)
+        rollback_config(m)
+        
 def get_storage(m: manager) -> None:
     storage_filter = "<get-system-storage></get-system-storage>"
     results = xmltodict.parse(m.rpc(storage_filter).data_xml)['rpc-reply']['system-storage-information']['filesystem']
@@ -116,10 +218,15 @@ def get_storage(m: manager) -> None:
     #for filesystems in results:
     #    if "/dev/gpt/var" in filesystems['filesystem-name']:
     #        if filesystems["available-blocks"]
+
 def upload_image(m: manager, location: str) -> str:
     pass
 
 def check_image(m: manager) -> None:
+    """
+    Check VM and OS Package's MD5 Hash
+    """
+
     vm_pkg_found = False
     os_pkg_found = False
     file_filter = "<file-list><path>/var/tmp</path></file-list>"
@@ -146,14 +253,17 @@ def check_image(m: manager) -> None:
         sys.exit()
 
 def main():
-    state = "enabled"
-
+    state = input("BGP State enabled/disabled: ")
+    if state == "disabled":
+        change_number = input("Enter CC number for shutdown notification: ") or "CC2-Testing"
+    else:
+        change_number = "None"
 
     try:
         with manager.connect(
             username = input("Username: "),
             password = getpass.getpass("Password: "),
-            host = input("Host: "),
+            host = input("Host: ") or "66.129.235.201", #Juniper vLabs test
             port = input("Port (Leave blank for default 830): ") or 830,
             device_params = {'name':'junos'},
             hostkey_verify=False,
@@ -162,13 +272,12 @@ def main():
             timeout=30
         ) as m:
 
-            bgp_neighbors = get_bgp_neighbors(m)
-            print(pandas.DataFrame(bgp_neighbors))
+           
+            
             get_storage(m)
-            update_bgp_neighbors(m, state)
-            #get_dhcp_time(m)
-            #with open("mx204.json","w") as f:
-            #    f.write(json.dumps(bgp_neighbors,indent=2))
+            update_bgp_neighbors(m, state,change_number)
+            get_interface_status(m)
+            print("Please reboot manually")
         
     except Exception as e:
         print("Failed to connect")
