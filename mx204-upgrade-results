@@ -1,0 +1,130 @@
+josh.mommers@L79Q9L7573 netops-demo % uv run mx204-upgrade.py                                                                                                                        
+BGP State enabled/disabled: disabled
+Enter CC number for shutdown notification: CC2-Demo
+Username: josh.mommers 
+Password: 
+Host: 
+Port (Leave blank for default 830): 36019
+   filesystem-name                              total-blocks                              used-blocks                          available-blocks used-percent      mounted-on
+0   /dev/gpt/junos   {'@format': '20G', '#text': '41803892'}  {'@format': '1.1G', '#text': '2329076'}   {'@format': '17G', '#text': '36130506'}            6         /.mount
+1  /dev/gpt/config   {'@format': '793M', '#text': '1624520'}       {'@format': '96K', '#text': '192'}   {'@format': '730M', '#text': '1494368'}            0  /.mount/config
+2     /dev/gpt/var  {'@format': '7.0G', '#text': '14616144'}   {'@format': '112M', '#text': '230368'}  {'@format': '6.3G', '#text': '13216488'}            2     /.mount/var
+3            tmpfs  {'@format': '4.8G', '#text': '10135072'}       {'@format': '76K', '#text': '152'}  {'@format': '4.8G', '#text': '10134920'}            0     /.mount/tmp
+4            tmpfs   {'@format': '674M', '#text': '1381040'}     {'@format': '772K', '#text': '1544'}   {'@format': '674M', '#text': '1379496'}            0     /.mount/mfs
+BGP Neighbor States before changes
+******************
+       peer-address  peer-group   peer-state
+0   10.100.25.1+179  to-AS64522  Established
+1   10.100.35.1+179  to-AS64522  Established
+2   10.100.45.1+179  to-AS64533  Established
+3  10.100.100.6+179        IBGP  Established
+Enabling Graceful-Shudown to all groups
+Validating results
+
+    Configuration Changes: 
+
+     [edit protocols bgp group IBGP]
++     graceful-shutdown {
++         sender {
++             local-preference 0;
++         }
++     }
+[edit protocols bgp group to-AS64533]
++     graceful-shutdown {
++         sender {
++             local-preference 0;
++         }
++     }
+[edit protocols bgp group to-AS64522]
++     graceful-shutdown {
++         sender {
++             local-preference 0;
++         }
++     }
+Commiting changes:  ok
+Validating results
+
+    Configuration Changes: 
+
+     [edit protocols bgp group IBGP]
++     shutdown {
++         notify-message CC2-Demo;
++     }
+[edit protocols bgp group to-AS64533]
++     shutdown {
++         notify-message CC2-Demo;
++     }
+[edit protocols bgp group to-AS64522]
++     shutdown {
++         notify-message CC2-Demo;
++     }
+Commiting changes:  ok
+Waiting for BGP Changes: 
+Post Change BGP Neighor Status:
+   peer-address  peer-group peer-state
+0   10.100.25.1  to-AS64522       Idle
+1   10.100.35.1  to-AS64522       Idle
+2   10.100.45.1  to-AS64533       Idle
+3  10.100.100.6        IBGP       Idle
+
+josh.mommers@L79Q9L7573 netops-demo % uv run mx204-upgrade.py
+BGP State enabled/disabled: enabled
+Username: josh.mommers
+Password: 
+Host: 
+Port (Leave blank for default 830): 36019
+   filesystem-name                              total-blocks                              used-blocks                          available-blocks used-percent      mounted-on
+0   /dev/gpt/junos   {'@format': '20G', '#text': '41803892'}  {'@format': '1.1G', '#text': '2329076'}   {'@format': '17G', '#text': '36130506'}            6         /.mount
+1  /dev/gpt/config   {'@format': '793M', '#text': '1624520'}       {'@format': '96K', '#text': '192'}   {'@format': '730M', '#text': '1494368'}            0  /.mount/config
+2     /dev/gpt/var  {'@format': '7.0G', '#text': '14616144'}   {'@format': '112M', '#text': '230312'}  {'@format': '6.3G', '#text': '13216544'}            2     /.mount/var
+3            tmpfs  {'@format': '4.8G', '#text': '10135992'}       {'@format': '76K', '#text': '152'}  {'@format': '4.8G', '#text': '10135840'}            0     /.mount/tmp
+4            tmpfs   {'@format': '674M', '#text': '1381040'}     {'@format': '772K', '#text': '1544'}   {'@format': '674M', '#text': '1379496'}            0     /.mount/mfs
+BGP Neighbor States before changes
+******************
+   peer-address  peer-group peer-state
+0   10.100.25.1  to-AS64522       Idle
+1   10.100.35.1  to-AS64522       Idle
+2   10.100.45.1  to-AS64533       Idle
+3  10.100.100.6        IBGP       Idle
+Removing Graceful shutdown
+Removing BGP shutdown
+Validating results
+
+    Configuration Changes: 
+
+     [edit protocols bgp group IBGP]
+-     graceful-shutdown {
+-         sender {
+-             local-preference 0;
+-         }
+-     }
+-     shutdown {
+-         notify-message CC2-Demo;
+-     }
+[edit protocols bgp group to-AS64533]
+-     graceful-shutdown {
+-         sender {
+-             local-preference 0;
+-         }
+-     }
+-     shutdown {
+-         notify-message CC2-Demo;
+-     }
+[edit protocols bgp group to-AS64522]
+-     graceful-shutdown {
+-         sender {
+-             local-preference 0;
+-         }
+-     }
+-     shutdown {
+-         notify-message CC2-Demo;
+-     }
+Commiting changes:  ok
+Waiting for BGP Changes: 
+Post Change BGP Neighor Status:
+       peer-address  peer-group   peer-state
+0   10.100.25.1+179  to-AS64522  OpenConfirm
+1       10.100.35.1  to-AS64522       Active
+2   10.100.45.1+179  to-AS64533  Established
+3  10.100.100.6+179        IBGP  Established
+

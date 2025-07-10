@@ -276,7 +276,12 @@ def main():
             
             get_storage(m)
             update_bgp_neighbors(m, state,change_number)
-            get_interface_status(m)
+            #Below is PoC for Demo as need to incorporate Pre/Post Changes
+            if state == "disabed":
+                update_dhcp_timers(m, 3600)
+            else:
+                update_dhcp_timers(m, 120)
+            #get_interface_status(m) #For Chassis Interface Debug
             print("Please reboot manually")
         
     except Exception as e:
