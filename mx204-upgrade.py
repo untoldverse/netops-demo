@@ -86,6 +86,7 @@ def update_bgp_neighbors(m: manager, state: str, change_number: str) -> None:
             print(
                 """
                 PLEASE ALLOW 15 MINUTES FOR TRAFFIC TO DRAIN BEFORE SHUTTING DOWN THE BGP NEIGHBORS
+
                 """
             ,
             )
@@ -201,20 +202,21 @@ def set_chassis_interface(m: manager) -> None:
 
 def get_dhcp_time(m: manager) -> None:
     current_dhcp_bindings = "<get-dhcp-server-binding-information></get-dhcp-server-binding-information>"
-
-    print(pandas.DataFrame(xmltodict.parse(m.rpc(current_dhcp_bindings).data_xml)['rpc-reply']['dhcp-server-binding-information']['dhcp-binding']))
-
+    try:
+        print(pandas.DataFrame(xmltodict.parse(m.rpc(current_dhcp_bindings).data_xml)['rpc-reply']['dhcp-server-binding-information']['dhcp-binding']))
+    except Exception as e:
+        print(e)
+        print("Is the DHCP service running?")
 def update_dhcp_timers(m: manager, time: int) -> None:
     """
     Set DHCP lease time 
     """
-    print("Current DHCP lease time configuration: ")
-    print(xmltodict.parse(m.command("show access protocol-attributes default-dhcp dhcp maximum-lease-time").data_xml))['rpc-reply']['output']
+
     dhcp_config_template = "set access protocol-attributes default-dhcp dhcp maximum-lease-time {{ time }}"
     try:
         m.load_configuration(
             action="set",
-            config=jinja2.Template(dhcp_config_template).render(time=time),
+            config=jinja2.Template(dhcp_config_template).render(time=str(time)),
             format="text"
         )
         print("Commiting DHCP maximum lease time change: ", commit_config(m))
@@ -267,12 +269,6 @@ def main():
     """
     MX204 script
     """
-    #Decide wither to set BGP graceful-shutdown, shutdown, or enable - Seperate as 3 choices as graceful-shutdown should be seperate to allow traffic to drain
-    state = input("BGP State graceful/enabled/disabled: ")
-    if state == "disabled":
-        change_number = input("Enter CC number for shutdown notification: ") or "CC2-Testing"
-    else:
-        change_number = "None"
 
     try:
         with manager.connect(
@@ -286,27 +282,60 @@ def main():
             allow_agent=False,
             timeout=30
         ) as m:
-
-           
-            print("Checks")
-            get_storage(m)
-
-            #Set DHCP Lease time to 3600 work is being done; else reset the timer back to 2 mins
-            if state.lower() == "disabed" or state.lower() == "graceful":
-                update_dhcp_timers(m, 3600)
-            else:
-                update_dhcp_timers(m, 120)
             
-            update_bgp_neighbors(m, state,change_number)
+            print("""
+            
+            Pre-Checks
+0
+            """
+            )
+            get_storage(m)
+            print("""
+            Current BGP Neighbor Status
+            """
+            )
+            print(pandas.DataFrame(get_bgp_neighbors(m)))
+            
+            get_dhcp_time(m)
+            #Decide wither to set BGP graceful-shutdown, shutdown, or enable - Seperate as 3 choices as graceful-shutdown should be seperate to allow traffic to drain
+            user_confirm = ""
+            change_number = ""
+            print("Setting DHCP Lease Time to 1 hour before starting: ", update_dhcp_timers(m, 3600))
 
-            """
-            TODO 
-            Call Chassis Interface config if BGP Neighbors are shut and the 4 port 100g are not configured
-            Call Software Add - Reboot Done Manually
-            """
-            print("Please reboot manually")
-        
+            while user_confirm != "6":
+                user_confirm = input("""
+        MX204 Upgrade Script:
+
+        Please note that upgrade manually and check for console connection before starting any work
+
+        Please select one option  
+        1. Enable BGP Graceful-Shutdown for all BGP groups
+        2. Shutdown BGP Neighbors
+        3. Enable BGP Neighbors and Remove BGP Graceful-shutdown
+        4. Update Interface Configurations
+        5. Set DHCP Timers back to 120s
+        6. Exit
+                """)
+                match user_confirm:
+                    case "1":
+                        update_bgp_neighbors(m, "graceful", change_number)
+                    case "2":
+                        update_bgp_neighbors(m, "disabled", input("Enter Change Number (Leave Blank for Maintenance): ") or "Maintenance")
+                    case "3":
+                        update_bgp_neighbors(m,"enabled", change_number)
+                    case "4":
+                        set_chassis_interface(m)
+                    case "5":
+                        print("Setting DHCP Lease Time back to 120", update_dhcp_timers(m, 120))
+                    case "6":
+                        print("Exiting...", sys.exit())
+                    case _:
+                        print("Enter a numerical value above")
+                        continue
+
+
     except Exception as e:
         print("Failed to connect")
+        print(e)
 if __name__ == "__main__":
     main()
